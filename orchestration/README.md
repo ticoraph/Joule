@@ -175,4 +175,4 @@ git commit -m "data <YYYY-MM>"
 git push
 ```
 
-Then check joule.tnera.fr once the deploy finishes.
+Then check the deployed app once the deploy finishes.

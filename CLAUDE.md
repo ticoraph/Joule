@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Electricity consumption platform (deployed at joule.tnera.fr): imports daily consumption/index/peak-power
+Electricity consumption platform (deployed on Cloud Run + Firebase Hosting): imports daily consumption/index/peak-power
 readings, visualizes trends, and will eventually forecast consumption. Backend is FastAPI + SQLAlchemy 2.0
 + SQLite; frontend is React + Vite + TypeScript + Tailwind + React Query + Recharts. Auth is Firebase
 Auth (Google Sign-In) with a server-side email allowlist.
@@ -20,7 +20,7 @@ Infra (Cloud Run, Artifact Registry, IAM, GCS data bucket) is managed in a separ
 builds/pushes/deploys two Cloud Run services —
 `tnera-joule` (the FastAPI API) and `tnera-joule-mlflow` (an MLflow tracking server, see below) — plus the
 built frontend SPA to Firebase Hosting. `firebase.json` rewrites `/api/**` to `tnera-joule` and
-`/mlflow/**` to `tnera-joule-mlflow`, both same-origin under joule.tnera.fr.
+`/mlflow/**` to `tnera-joule-mlflow`, both same-origin under the app's public hostname.
 
 ## Local development
 
@@ -40,10 +40,10 @@ docker compose up -d
 - MLflow UI: http://localhost:5001 (tracking server; SQLite backend store `mlflow/mlflow.db` + artifact
   store `mlflow/artifacts/`, both gitignored and created on first run). Also deployed in production as its
   own Cloud Run service (`tnera-joule-mlflow`, `mlflow/Dockerfile`) with an *empty* registry (nothing is
-  baked into the image; the allowed Host headers come from `MLFLOW_ALLOWED_HOSTS`), reachable at joule.tnera.fr/mlflow via the Firebase Hosting rewrite — pinned to
+  baked into the image; the allowed Host headers come from `MLFLOW_ALLOWED_HOSTS`, set at deploy time from the GitHub Actions repo variable of the same name — the Dockerfile default is `localhost`), reachable at `/mlflow` on the app's public hostname via the Firebase Hosting rewrite — pinned to
   `--workers 1` (Cloud Run's startup CPU boost otherwise spawns one worker per available CPU and OOMs)
   and an explicit `--allowed-hosts` list (MLflow 3.x's DNS-rebinding guard 403s any Host header not on
-  it; must include joule.tnera.fr since Hosting forwards the original Host). Training scripts (`mlflow/train_xgboost.py`, `train_timesfm.py`, `train_chronos2.py`,
+  it; must include the public hostname since Hosting forwards the original Host). Training scripts (`mlflow/train_xgboost.py`, `train_timesfm.py`, `train_chronos2.py`,
   `train_prophet.py`, `scripts/model_average.py`, `predict_prod.py`) are run manually/offline against this
   tracking server — not wired into any endpoint or CI job. They log runs/models to it and
   `predict_prod.py --model ... --version ...` promotes whichever version is passed to `Production` in the

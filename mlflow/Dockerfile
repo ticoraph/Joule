@@ -9,7 +9,9 @@ RUN mkdir -p /mlflow/artifacts
 
 ENV PORT=8080
 # Host headers MLflow accepts (DNS-rebinding guard); Firebase Hosting forwards the public hostname.
-ENV MLFLOW_ALLOWED_HOSTS=joule.tnera.fr
+# Local-only default: the real hostname is set as a Cloud Run env var at deploy time
+# (GitHub Actions variable MLFLOW_ALLOWED_HOSTS), so it isn't committed to this public repo.
+ENV MLFLOW_ALLOWED_HOSTS=localhost
 EXPOSE 8080
 
 # Basic-auth credentials (MLFLOW_ADMIN_USERNAME/MLFLOW_ADMIN_PASSWORD, password >12 chars) and

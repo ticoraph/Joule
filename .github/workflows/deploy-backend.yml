@@ -118,13 +118,20 @@ jobs:
           echo "image=$IMAGE_BASE:$IMAGE_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Deploy MLflow to Cloud Run
+        env:
+          # Public hostname Hosting forwards (MLflow's DNS-rebinding guard 403s anything else). Kept in a
+          # repo variable rather than the Dockerfile since this repo is public. Single host only (a comma
+          # would break the --update-env-vars syntax).
+          MLFLOW_ALLOWED_HOSTS: ${{ vars.MLFLOW_ALLOWED_HOSTS }}
         run: |
+          : "${MLFLOW_ALLOWED_HOSTS:?Set the MLFLOW_ALLOWED_HOSTS repository variable}"
           gcloud run deploy ${{ env.MLFLOW_SERVICE_NAME }} \
             --image=${{ steps.build-mlflow.outputs.image }} \
             --region=${{ env.GCP_REGION }} \
             --project=${{ env.GCP_PROJECT }} \
             --service-account=sa-${{ env.SERVICE_NAME }}@${{ env.GCP_PROJECT }}.iam.gserviceaccount.com \
             --memory=2Gi \
+            --update-env-vars=MLFLOW_ALLOWED_HOSTS="${MLFLOW_ALLOWED_HOSTS}" \
             --quiet
           # MLFLOW_ADMIN_USERNAME / MLFLOW_ADMIN_PASSWORD / MLFLOW_FLASK_SERVER_SECRET_KEY are owned by
           # Terraform (TneRa-Prod, infra/envs/prod/joule) as Secret Manager references - setting them

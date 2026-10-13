@@ -2,7 +2,6 @@
 
 Electricity consumption platform: import daily consumption/index/peak-power data, visualize trends, and (later) forecast future consumption with machine learning.
 
-Deployed at **joule.tnera.fr**.
 
 > **Try it without any personal data:** `python scripts/make_sample_data.py` generates a synthetic dataset
 > (4.5 years of fake daily readings) into `data/joule.db`. The author's real data is not part of this repository.
@@ -248,7 +247,7 @@ page's correlation matrix and its `GET /api/readings/feature-importance` XGBoost
 - **Tracking server**: MLflow, backed by `mlflow/mlflow.db` (SQLite) and `mlflow/artifacts/` — both
   gitignored and created on first run. The deployed server starts with an empty registry.
   Runs locally at <http://localhost:5001> (`docker compose up`) and is also deployed to its own Cloud Run
-  service, reachable in production at joule.tnera.fr/mlflow via the Firebase Hosting rewrite in
+  service, reachable in production at `/mlflow` on the app's public hostname via the Firebase Hosting rewrite in
   `firebase.json`.
 - **`scripts/dataset_creation.py`**: drops/rebuilds a `dataset` table from `daily_readings` +
   `feature_engineering` (2022-01-01 onward) with added temporal/cyclical features — the table every
@@ -287,7 +286,7 @@ Federation (no JSON key):
    memory and 1 worker — Cloud Run's startup CPU boost otherwise spawns one worker per available CPU and
    OOMs regardless of the memory limit),
 3. the built frontend SPA to Firebase Hosting, which rewrites `/api/**` to `tnera-joule` and `/mlflow/**`
-   to `tnera-joule-mlflow` so both are served same-origin under joule.tnera.fr.
+   to `tnera-joule-mlflow` so both are served same-origin under the app's public hostname.
 
 `.github/workflows/ci.yml` runs on PRs and pushes to `main`: backend `ruff check` + `pytest`, frontend
 `npm run build`.
