@@ -1,0 +1,15 @@
+{
+  "projects": {
+    "default": "tnera-prod"
+  },
+  "targets": {
+    "tnera-prod": {
+      "hosting": {
+        "joule": [
+          "tnera-prod-joule"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

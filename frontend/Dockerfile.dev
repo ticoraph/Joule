@@ -1,0 +1,8 @@
+# Local dev image (hot reload). In prod, the frontend is built and copied into the backend.
+FROM node:20-slim
+WORKDIR /app
+COPY package.json ./
+RUN npm install
+COPY . .
+EXPOSE 5177
+CMD ["npm", "run", "dev"]

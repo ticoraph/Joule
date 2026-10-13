@@ -1,0 +1,9 @@
+playwright
+openpyxl
+requests
+beautifulsoup4
+lxml
+pandas
+mitmproxy
+llama-cpp-python>=0.3.0
+huggingface-hub>=0.20.0

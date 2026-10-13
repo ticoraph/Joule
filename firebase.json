@@ -1,0 +1,38 @@
+{
+  "hosting": {
+    "target": "joule",
+    "public": "frontend/dist",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "headers": [
+      {
+        "source": "**",
+        "headers": [
+          {
+            "key": "X-Robots-Tag",
+            "value": "noindex, nofollow"
+          }
+        ]
+      }
+    ],
+    "rewrites": [
+      {
+        "source": "/api/**",
+        "run": {
+          "serviceId": "tnera-joule",
+          "region": "europe-west4"
+        }
+      },
+      {
+        "source": "/mlflow/**",
+        "run": {
+          "serviceId": "tnera-joule-mlflow",
+          "region": "europe-west4"
+        }
+      },
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}

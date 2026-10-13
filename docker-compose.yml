@@ -1,0 +1,54 @@
+name: joule
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: sqlite:///data/joule.db
+      CORS_ORIGINS: http://localhost:5177
+      PORT: 8000
+      GOOGLE_APPLICATION_CREDENTIALS: /tmp/adc.json
+    # hot reload: host code is mounted, uvicorn reloads on every change
+    volumes:
+      - ./backend:/app
+      - ./data:/app/data
+      - ~/.config/gcloud/application_default_credentials.json:/tmp/adc.json:ro
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8001:8000"
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v3.14.0
+    volumes:
+      - ./mlflow:/mlflow
+    command: >
+      mlflow server
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --default-artifact-root mlflow-artifacts:/
+      --serve-artifacts
+      --artifacts-destination /mlflow/artifacts
+      --host 0.0.0.0
+      --port 5000
+    ports:
+      - "5001:5000"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    environment:
+      VITE_API_URL: http://localhost:8001
+      CHOKIDAR_USEPOLLING: "true"
+    # Vite hot reload: code mounted, node_modules kept from the image
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "5177:5177"
+    depends_on:
+      - api

@@ -1,0 +1,8 @@
+{
+  "temperature": {
+    "lumi.XXXXXXXXXXXXXX": "AQR_TempSalon"
+  },
+  "power": {
+    "lumi.XXXXXXXXXXXXXX": "AQR_PriseExemple_kWh"
+  }
+}

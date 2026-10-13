@@ -1,0 +1,142 @@
+name: Deploy backend (Cloud Run)
+
+# Cloud Run serves the FastAPI API under /api; Firebase Hosting serves the
+# built React SPA and rewrites /api/** to Cloud Run. Build image, push to
+# Artifact Registry, deploy to Cloud Run, deploy SPA to Firebase Hosting —
+# without JSON service key (Workload Identity Federation).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - "mlflow/**"
+      - "firebase.json"
+      - ".firebaserc"
+      - ".github/workflows/deploy-backend.yml"
+
+env:
+  GCP_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+  GCP_REGION: europe-west4
+  AR_REPO: tnera-joule
+  SERVICE_NAME: tnera-joule
+  IMAGE_NAME: api
+  MLFLOW_SERVICE_NAME: tnera-joule-mlflow
+  MLFLOW_IMAGE_NAME: mlflow
+  # Private bucket (Terraform: TneRa-Prod, infra/envs/prod/joule) holding joule.db, predictions/ and
+  # llm_reports/. The data is deliberately not in this public repo; re-run this workflow
+  # (workflow_dispatch) after uploading a new snapshot: gcloud storage rsync -r data gs://<bucket>/data
+  DATA_BUCKET: ${{ vars.GCP_DATA_BUCKET }}
+
+permissions:
+  id-token: write # Workload Identity Federation
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to GCP (Workload Identity Federation)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          token_format: access_token
+
+      - name: Set up gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Pull production data (private bucket)
+        run: |
+          mkdir -p data
+          gcloud storage rsync --recursive "gs://${DATA_BUCKET}/data" data
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend (relative API paths, served same-origin via Hosting rewrite)
+        working-directory: frontend
+        env:
+          VITE_API_URL: ""
+          VITE_FIREBASE_API_KEY: ${{ vars.VITE_FIREBASE_API_KEY }}
+          VITE_FIREBASE_AUTH_DOMAIN: ${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}
+          VITE_FIREBASE_PROJECT_ID: ${{ vars.VITE_FIREBASE_PROJECT_ID }}
+          VITE_FIREBASE_APP_ID: ${{ vars.VITE_FIREBASE_APP_ID }}
+        run: npm run build
+
+      - name: Build & push image
+        id: build
+        env:
+          IMAGE_BASE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.AR_REPO }}/${{ env.IMAGE_NAME }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build \
+            -f backend/Dockerfile \
+            -t $IMAGE_BASE:$IMAGE_TAG \
+            -t $IMAGE_BASE:latest \
+            .
+          docker push $IMAGE_BASE:$IMAGE_TAG
+          docker push $IMAGE_BASE:latest
+          echo "image=$IMAGE_BASE:$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --image=${{ steps.build.outputs.image }} \
+            --region=${{ env.GCP_REGION }} \
+            --project=${{ env.GCP_PROJECT }} \
+            --quiet
+
+      - name: Build & push MLflow image
+        id: build-mlflow
+        env:
+          IMAGE_BASE: ${{ env.GCP_REGION }}-docker.pkg.dev/${{ env.GCP_PROJECT }}/${{ env.AR_REPO }}/${{ env.MLFLOW_IMAGE_NAME }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build \
+            -f mlflow/Dockerfile \
+            -t $IMAGE_BASE:$IMAGE_TAG \
+            -t $IMAGE_BASE:latest \
+            .
+          docker push $IMAGE_BASE:$IMAGE_TAG
+          docker push $IMAGE_BASE:latest
+          echo "image=$IMAGE_BASE:$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy MLflow to Cloud Run
+        run: |
+          gcloud run deploy ${{ env.MLFLOW_SERVICE_NAME }} \
+            --image=${{ steps.build-mlflow.outputs.image }} \
+            --region=${{ env.GCP_REGION }} \
+            --project=${{ env.GCP_PROJECT }} \
+            --service-account=sa-${{ env.SERVICE_NAME }}@${{ env.GCP_PROJECT }}.iam.gserviceaccount.com \
+            --memory=2Gi \
+            --quiet
+          # MLFLOW_ADMIN_USERNAME / MLFLOW_ADMIN_PASSWORD / MLFLOW_FLASK_SERVER_SECRET_KEY are owned by
+          # Terraform (TneRa-Prod, infra/envs/prod/joule) as Secret Manager references - setting them
+          # here as literals fails ("already been set with a different type"). gcloud run deploy keeps
+          # the service's existing env/secrets when they aren't passed.
+
+      - name: Deploy SPA to Firebase Hosting
+        run: npx firebase-tools deploy --only hosting:joule --project ${{ env.GCP_PROJECT }} --non-interactive
+
+      - name: Show service URL
+        run: |
+          gcloud run services describe ${{ env.SERVICE_NAME }} \
+            --region=${{ env.GCP_REGION }} \
+            --project=${{ env.GCP_PROJECT }} \
+            --format="value(status.url)"
