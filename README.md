@@ -191,7 +191,7 @@ python3 scripts/eau_merge_csv.py
 # 3. Build the flat dataset
 python3 scripts/final_processing.py && python3 scripts/transformation_processing.py
 
-# 4. Load into SQLite
+# 4. Load into the database (SQLite locally)
 python3 scripts/import_csv.py && python3 scripts/feature_engineering.py
 
 # 5. (Before training only) rebuild the `dataset` table
@@ -217,9 +217,9 @@ Steps 3–6 and 8 have no interactive auth and are chained by `orchestration/Mak
 `orchestration/flow.py` (own venv, no Prefect server) — see [orchestration/README.md](orchestration/README.md).
 Steps 1–2 stay manual: several sources need a saved login session or a fresh mitmproxy capture.
 
-## Importing CSV data into SQLite
+## Importing CSV data into the database
 
-Run from the repo root, with `backend/`'s dependencies installed and `DATABASE_URL` pointed at your SQLite database (defaulting to `sqlite:///data/joule.db`):
+Run from the repo root, with `backend/`'s dependencies installed and `DATABASE_URL` pointed at your database (SQLite by default: `sqlite:///data/joule.db`; PostgreSQL in production):
 ```bash
 python scripts/import_csv.py
 ```
@@ -295,12 +295,13 @@ Federation (no JSON key):
 
 - `backend/`: FastAPI API (`app/`), Dockerfile, requirements
   - `app/models.py`, `app/schemas.py`: SQLAlchemy / Pydantic models (`DailyReading`, `FeatureEngineering`)
+  - `app/db_copy.py`: one-shot `python -m app.db_copy`, copies a SQLite file into the `DATABASE_URL` database (SQLite → PostgreSQL cut-over)
   - `app/routers/`: `readings` (daily readings + feature-importance), `dashboard`, `database`,
     `predictions` (model backtests + production forecast, reads `data/predictions/`), `llm` (reads
     pre-generated reports from `data/llm_reports/`) endpoints
 - `scripts/`: data pipeline — `enedis_*.py`, `ecoflow_*.py`, `tesla_*.py`, `aqara_download_app.py`,
   `water_download.py`/`eau_merge_csv.py`, `infoclimat_download.py`, `final_processing.py`,
-  `transformation_processing.py`, `feature_engineering.py`, `import_csv.py` (CSV → SQLite loader),
+  `transformation_processing.py`, `feature_engineering.py`, `import_csv.py` (CSV → database loader, SQLite or PostgreSQL),
   `dataset_creation.py` (builds the `dataset` table for training), `model_average.py` (naive seasonal
   average model), `analysis_llm.py` (local LLM backtest analysis) — see "Data pipeline" and "Predictions &
   MLflow" above
@@ -322,8 +323,4 @@ Federation (no JSON key):
   `scripts/model_average.py`, served by `GET /api/predictions/*`
 - `data/llm_reports/`: JSON reports written by `scripts/analysis_llm.py`, served by `GET /api/llm/*`
   (gitignored)
-- `docker-compose.yml`: local development environment (API + frontend)
-- `legacy/`: previous Jekyll/GitHub Pages site and matplotlib analysis scripts
-
----
-*Previous static Jekyll/matplotlib site replaced by this FastAPI + React + SQLite stack.*
+- `docker-compose.yml`: local development environment (API + MLflow + frontend)
