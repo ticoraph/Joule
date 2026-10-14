@@ -11,6 +11,22 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: joule
+          POSTGRES_PASSWORD: joule
+          POSTGRES_DB: joule_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U joule"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql+psycopg2://joule:joule@localhost:5432/joule_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

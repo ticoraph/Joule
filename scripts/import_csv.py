@@ -2,7 +2,7 @@
 
 Self-adapting: any CSV column without a matching daily_readings column (match
 is case-insensitive, e.g. "Conso" -> "conso") gets the column added on the fly
-(REAL if every non-empty value parses as a float, TEXT otherwise).
+(DOUBLE PRECISION if every non-empty value parses as a float, TEXT otherwise).
 Existing values are never overwritten - a row is inserted if its date is new,
 and only the still-NULL columns of an existing date are filled in.
 
@@ -26,6 +26,7 @@ LOG_DIR = REPO_ROOT / "logs"
 
 sys.path.insert(0, str(REPO_ROOT / "backend"))
 
+from app import models  # noqa: E402, F401  (enregistre les tables dans Base.metadata)
 from app.core.db import Base, engine
 
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -68,7 +69,7 @@ def ensure_columns(conn: Connection, fieldnames: list[str], rows: list[dict[str,
         if db_column in types:
             continue
         samples = [row[csv_column] for row in rows if row[csv_column] not in MISSING_VALUES]
-        sql_type = "REAL" if samples and all(is_floatable(v) for v in samples) else "TEXT"
+        sql_type = "DOUBLE PRECISION" if samples and all(is_floatable(v) for v in samples) else "TEXT"
         conn.execute(text(f'ALTER TABLE {TABLE} ADD COLUMN "{db_column}" {sql_type}'))
         types[db_column] = sql_type.lower()
         logger.info(f"Colonne ajoutee: {db_column} ({sql_type})")
@@ -90,7 +91,8 @@ def upsert_rows(
     db_columns = ["date", *mapping.values()]
 
     set_clause = ", ".join(
-        f'"{c}" = COALESCE("{c}", excluded."{c}")' for c in db_columns if c != "date"
+        # cible qualifiée (daily_readings."c") : sinon ambigu avec excluded."c" sous PostgreSQL
+        f'"{c}" = COALESCE({TABLE}."{c}", excluded."{c}")' for c in db_columns if c != "date"
     )
     columns_sql = ", ".join(f'"{c}"' for c in db_columns)
     placeholders = ", ".join(f":{c}" for c in db_columns)

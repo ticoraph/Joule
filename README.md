@@ -16,7 +16,7 @@ Electricity consumption platform: import daily consumption/index/peak-power data
 - **Climat**: daily temperature/precipitation trends plus a yearly Été/Hiver seasonal comparison chart.
 - **Feature Engineering**: client-side Pearson correlation matrix and a server-trained XGBoost
   feature-importance chart (selectable target variable) over the derived metrics.
-- **Database**: raw SQLite table dump viewer.
+- **Database**: raw table dump viewer.
 - **Predictions**: per-model backtest comparison (Chronos2 / TimesFM / XGBoost / Prophet / Average, with
   MAE/RMSE/bias/MAPE) plus a production forecast chart with p10/p90 uncertainty bands.
 - **Analyse LLM**: a locally-run Qwen3-4B (GGUF) report comparing the backtests, flagging anomalies, and
@@ -24,7 +24,7 @@ Electricity consumption platform: import daily consumption/index/peak-power data
 
 ## Tech stack
 
-- **Backend**: FastAPI + SQLAlchemy 2.0 + SQLite
+- **Backend**: FastAPI + SQLAlchemy 2.0 + SQLite (local) / PostgreSQL (production)
 - **Frontend**: React + Vite + TypeScript + Tailwind CSS + React Query + Recharts
 - **Infrastructure**: Cloud Run, Artifact Registry, IAM and a private GCS data bucket, managed in a separate private Terraform repo (project `tnera-prod`, region `europe-west4`). This repo owns app code, `firebase.json`/`.firebaserc` for Firebase Hosting, and its own deploy workflow that builds/deploys the API, an MLflow tracking server, and the SPA — see [Deployment](#deployment) below.
 - **Auth**: Firebase Auth (Google Sign-In), enforced by an email allowlist verified server-side
@@ -227,7 +227,7 @@ Self-adapting and idempotent: any CSV column without a matching `daily_readings`
 the fly, and existing values are never overwritten - only new dates get inserted and still-NULL columns
 of existing dates get filled in.
 
-For production, the SQLite database file (`data/joule.db`) is not in this repository: the deploy workflow pulls `data/` from a private GCS bucket (repo variable `GCP_DATA_BUCKET`) and embeds it in the Docker image.
+In production the database is Cloud SQL PostgreSQL (`DATABASE_URL` from Secret Manager). The real data is not in this repository; the deploy workflow still pulls `data/` (predictions, LLM reports) from a private GCS bucket (repo variable `GCP_DATA_BUCKET`). To load new data into production, point `scripts/import_csv.py` at the production database through the Cloud SQL Auth Proxy, or copy a local SQLite file with `python -m app.db_copy` (see its docstring).
 
 ## Feature engineering
 

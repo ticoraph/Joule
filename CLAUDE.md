@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Electricity consumption platform (deployed on Cloud Run + Firebase Hosting): imports daily consumption/index/peak-power
 readings, visualizes trends, and will eventually forecast consumption. Backend is FastAPI + SQLAlchemy 2.0
-+ SQLite; frontend is React + Vite + TypeScript + Tailwind + React Query + Recharts. Auth is Firebase
++ SQLite locally / PostgreSQL in production (Cloud SQL `pg-shared`); frontend is React + Vite + TypeScript + Tailwind + React Query + Recharts. Auth is Firebase
 Auth (Google Sign-In) with a server-side email allowlist.
 
 This repo is public: it contains no personal data. The author's real dataset (`data/`), MLflow registry and
@@ -36,8 +36,8 @@ docker compose up -d
 ```
 
 - Frontend: http://localhost:5177 (Vite, hot reload via mounted volume)
-- API: http://localhost:8001 (`/health`, `/docs`); SQLite file at data/joule.db
-- MLflow UI: http://localhost:5001 (tracking server; SQLite backend store `mlflow/mlflow.db` + artifact
+- API: http://localhost:8001 (`/health`, `/docs`); SQLite file at data/joule.db (local default; prod uses PostgreSQL via `DATABASE_URL`)
+- MLflow UI: http://localhost:5001 (tracking server; SQLite backend store locally — in production the backend store and basic-auth users are on Cloud SQL PostgreSQL via `MLFLOW_BACKEND_STORE_URI` / `MLFLOW_AUTH_DB_URI`, see `mlflow/Dockerfile`; SQLite file `mlflow/mlflow.db` + artifact
   store `mlflow/artifacts/`, both gitignored and created on first run). Also deployed in production as its
   own Cloud Run service (`tnera-joule-mlflow`, `mlflow/Dockerfile`) with an *empty* registry (nothing is
   baked into the image; the allowed Host headers come from `MLFLOW_ALLOWED_HOSTS`, set at deploy time from the GitHub Actions repo variable of the same name — the Dockerfile default is `localhost`), reachable at `/mlflow` on the app's public hostname via the Firebase Hosting rewrite — pinned to
@@ -86,7 +86,7 @@ npm run preview
 
 ### Backend (`backend/app/`)
 - `main.py`: creates the FastAPI app, runs `Base.metadata.create_all` on startup (no migration tool —
-  SQLite schema changes are additive columns/tables applied via SQLAlchemy create_all), wires CORS from
+  schema changes are additive columns/tables applied via SQLAlchemy create_all), wires CORS from
   `settings.cors_list`, mounts `routers.readings`, `routers.dashboard`, `routers.database`,
   `routers.predictions`, and `routers.llm` under `/api`.
 - `core/config.py`: `pydantic-settings` `Settings`, reads `.env` then `.env.local` (local overrides win).
@@ -95,7 +95,8 @@ npm run preview
 - `core/security.py`: `get_current_user_email` FastAPI dependency — verifies a Firebase ID token via
   `firebase_admin`, requires `email_verified` and membership in `settings.allowed_emails_list`
   (lowercased), otherwise 401/403. This dependency is attached at the router level (not per-endpoint).
-- `core/db.py`: SQLite SQLAlchemy engine/session/`Base`, `get_db` dependency.
+- `core/db.py`: SQLAlchemy engine/session/`Base`, `get_db` dependency. Dual-dialect: SQLite by default, PostgreSQL when `DATABASE_URL` says so (small pool, `pool_size=2`, since `pg-shared` only allows 75 connections for all apps). Keep SQL portable (no `sqlite_master`, `PRAGMA`, `date('now')`).
+- `db_copy.py`: one-shot `python -m app.db_copy` — copies an existing SQLite file (`SOURCE_DATABASE_URL`) into the database of `DATABASE_URL` (overwrites the target, never touches the source, realigns Postgres sequences). Used for the SQLite → PostgreSQL cut-over.
 - `models.py`: two tables — `DailyReading` (one row per day, columns prefixed by source: `ene_*`
   consumption/index/peak-power, `eco_*` solar/battery, `cli_*` temperature/precipitation, `eau_*` water,
   `tes_*` Tesla charging, `aqr_*` Aqara room temps/smart-plug energy, `sun_*` sunrise/sunset) and
@@ -108,7 +109,7 @@ npm run preview
   on every request.
 - `routers/dashboard.py`: aggregates `DailyReading` in Python (not SQL) into totals, averages, max peak
   power, and a per-month consumption series — the data source for the Dashboard page's KPIs and chart.
-- `routers/database.py`: `GET /database/dump` — introspects and dumps every SQLite table (last 365 days
+- `routers/database.py`: `GET /database/dump` — introspects (SQLAlchemy inspector, works on SQLite and PostgreSQL) and dumps every table (last 365 days
   for tables with a `date` column) for the Database page; auth-gated like every other router.
 - `routers/predictions.py`: `GET /predictions/models` — reads the latest CSV per model
   (`data/predictions/Joule_{Chronos2,TimesFM,XGBoost,Prophet,Average}_*.csv`, glob'd by filename pattern,
@@ -220,10 +221,9 @@ raw exports in `data/raw/` and idempotently merges them into `data/processed/`:
   `data/dataset/Transformation-ByDay.csv`, the flat, model-ready file intended for the future ML
   forecasting work behind the Predictions page and the one `import_csv.py` loads.
   
-- **`scripts/import_csv.py`**: self-adapting, idempotent CSV → SQLite loader for
+- **`scripts/import_csv.py`**: self-adapting, idempotent CSV → database loader (SQLite or PostgreSQL; new columns are `DOUBLE PRECISION`/`TEXT`, upsert qualifies the target table in `ON CONFLICT … DO UPDATE` because PostgreSQL rejects the ambiguous form) for
   `data/dataset/Transformation-ByDay.csv` — any CSV column without a matching `daily_readings` column
-  gets added on the fly. Run locally pointed at `DATABASE_URL` (SQLite database file at `data/joule.db`); in production the
-  database is pulled from the private GCS bucket and embedded in the Docker image by CI. This is the only write path into the database — there are no
+  gets added on the fly. Run pointed at `DATABASE_URL`: the local SQLite file `data/joule.db`, or the production Cloud SQL database through the Cloud SQL Auth Proxy (production no longer embeds a SQLite file in the image; `data/` from the private GCS bucket now only provides predictions/LLM reports and the one-off migration source). This is the only write path into the database — there are no
   admin/write API endpoints.
 
 - **`scripts/dataset_creation.py`**: drops and rebuilds a `dataset` table from `daily_readings` +

@@ -1,5 +1,7 @@
+from datetime import date, timedelta
+
 from fastapi import APIRouter, Depends
-from sqlalchemy import text
+from sqlalchemy import MetaData, Table, inspect, select
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
@@ -9,33 +11,26 @@ router = APIRouter(
     prefix="/database", tags=["database"], dependencies=[Depends(get_current_user_email)]
 )
 
+
 @router.get("/dump")
 def dump_database(db: Session = Depends(get_db)):
-    # Get all table names
-    tables_result = db.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")).all()
-    tables = [row[0] for row in tables_result]
-    
+    """Contenu de chaque table (365 derniers jours si la table a une colonne `date`).
+
+    Introspection SQLAlchemy : fonctionne sur SQLite (local) comme sur PostgreSQL (prod).
+    """
+    engine = db.get_bind()
+    since = date.today() - timedelta(days=365)
+
     result = []
-    for table in tables:
-        # Get column names using PRAGMA table_info
-        cols_result = db.execute(text(f"PRAGMA table_info({table})")).all()
-        columns = [row[1] for row in cols_result]
-        
-        # Get all rows
-        query = f"SELECT * FROM {table}"
-        if "date" in columns:
-            query += " WHERE date >= date('now', '-365 days') ORDER BY date DESC"
-            
-        rows_result = db.execute(text(query)).all()
-        
-        rows = []
-        for row in rows_result:
-            rows.append(dict(zip(columns, row)))
-            
-        result.append({
-            "name": table,
-            "columns": columns,
-            "rows": rows
-        })
-        
+    for name in inspect(engine).get_table_names():
+        table = Table(name, MetaData(), autoload_with=engine)
+        columns = [c.name for c in table.columns]
+
+        stmt = select(table)
+        if "date" in table.c:
+            stmt = stmt.where(table.c.date >= since).order_by(table.c.date.desc())
+
+        rows = [dict(zip(columns, row)) for row in db.execute(stmt).all()]
+        result.append({"name": name, "columns": columns, "rows": rows})
+
     return result
